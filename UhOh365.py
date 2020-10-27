@@ -13,6 +13,7 @@ import string
 import threading
 import time
 import requests
+from urllib import parse
 
 
 email_queue = queue.Queue()
@@ -20,7 +21,7 @@ print_queue = queue.Queue()
 args = None
 domain_is_o365 = {}
 domain_is_o365_lock = threading.Lock()
-
+validated = {}
 
 def parse_args():
     parser = argparse.ArgumentParser(description="This script uses the autodiscover json API of office365 to enumerate "
@@ -33,6 +34,7 @@ def parse_args():
                         action="store_true")
     parser.add_argument("-t", "--threads", help="Number of threads to run with. Default is 20", type=int, default=20)
     parser.add_argument("-o", "--output", help="Output file for valid emails only", type=argparse.FileType('w'))
+    parser.add_argument("-c", "--csv", help="Output CSV file with full results", type=argparse.FileType('w'))
     parser.add_argument("-n", "--nossl", help="Turn off SSL verification. This can increase speed if needed",
                         action="store_false")
     parser.add_argument("-p", "--proxy", help="Specify a proxy to run this through (eg: 'http://127.0.0.1:8080')")
@@ -67,14 +69,29 @@ def thread_worker(args):
             r = requests.get('https://outlook.office365.com/autodiscover/autodiscover.json/v1.0/{}?Protocol=Autodiscoverv1'.format(email), headers=headers, verify=args.nossl, allow_redirects=False, proxies=proxies)
             if r.status_code == 200 and "X-MailboxGuid" in r.headers.keys():
                 print("VALID: ", email)
+                validated[email] = "VALID"
                 if args.output is not None:
                     print_queue.put(email)
             elif r.status_code == 302:
                 if domain_is_o365[domain] and 'outlook.office365.com' not in r.text:
                     print("VALID: ", email)
+                    validated[email] = "VALID"
                     if args.output is not None:
                         print_queue.put(email)
+                elif r.headers["location"] and r.headers["location"].find("https://outlook.office365.com/autodiscover/autodiscover.json?Email") >= 0 :
+                    l = r.headers["location"]
+                    email = parse.parse_qsl(l)[0][1]
+                    #print("VALID: ", email)
+                    #validated[email] = "VALID"
+                    print("NEW: ", email)
+                    email_queue.put(email)
+                    #if args.output is not None:
+                    #    print_queue.put(email)
+                else:
+                    print("UNKNOWN: ", email)
+
             else:
+                validated[email] = "INVALID"
                 if args.verbose:
                     print("INVALID: ", email)
         except requests.exceptions.SSLError as e:
@@ -134,8 +151,11 @@ def main():
 
     print_thread.join()
 
-    print("Done!  Total execution time: ", time.perf_counter() - start, " seconds")
+    if args.csv:
+        for i in validated.keys():
+            args.csv.write("%s,%s\n" % (i, validated[i]))
 
+    print("Done!  Total execution time: ", time.perf_counter() - start, " seconds")
 
 if __name__ == "__main__":
     main()
