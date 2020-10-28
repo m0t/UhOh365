@@ -80,11 +80,17 @@ def thread_worker(args):
                         print_queue.put(email)
                 elif r.headers["location"] and r.headers["location"].find("https://outlook.office365.com/autodiscover/autodiscover.json?Email") >= 0 :
                     l = r.headers["location"]
-                    email = parse.parse_qsl(l)[0][1]
+                    new_email = parse.parse_qsl(l)[0][1]
                     #print("VALID: ", email)
                     #validated[email] = "VALID"
-                    print("NEW: ", email)
-                    email_queue.put(email)
+                    if new_email != email:  
+                        print("NEW: ", new_email)
+                        email_queue.put(new_email)
+                    else:
+                        print("VALID: ", new_email)
+                        validated[new_email] = "VALID"
+                        if args.output is not None:
+                            print_queue.put(new_email)
                     #if args.output is not None:
                     #    print_queue.put(email)
                 else:
